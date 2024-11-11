@@ -1,0 +1,142 @@
+---
+title: "Red wine Quality"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-11-11"
+---
+
+Set Up and Load Packages
+```{r setup, include=FALSE}
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+
+# Install required packages if not already installed
+install.packages(c("tidyverse", "caret", "randomForest", "pROC", "e1071"))
+
+# Load the libraries
+update.packages(ask = FALSE)
+library(tidyverse)
+library(dplyr)
+library(corrplot)
+library(caret)
+library(randomForest)
+library(pROC)
+
+```
+
+Load and Inspect the Dataset
+```{r}
+# Load the dataset
+wine_data <- read.csv("~/Downloads/winequality-red.csv")
+
+# Preview the data
+head(wine_data)
+summary(wine_data)
+
+# Check for missing values
+sum(is.na(wine_data))
+
+```
+
+Exploratory Data Analysis (EDA)
+```{r}
+# Correlation matrix
+cor_matrix <- cor(wine_data %>% select(-quality))
+corrplot::corrplot(cor_matrix, method = "circle")
+
+# Histograms for each variable
+wine_data %>%
+  gather(key = "variable", value = "value", -quality) %>%
+  ggplot(aes(x = value)) +
+  facet_wrap(~ variable, scales = "free") +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  theme_minimal()
+
+# Boxplot to identify outliers
+wine_data %>%
+  gather(key = "variable", value = "value", -quality) %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot() +
+  theme_minimal()
+
+```
+
+Data Preprocessing
+```{r}
+# Scale features
+wine_data_scaled <- as.data.frame(scale(wine_data %>% select(-quality)))
+wine_data_scaled$quality <- wine_data$quality
+
+# Convert quality to binary
+wine_data_scaled$quality_binary <- ifelse(wine_data_scaled$quality >= 7, 1, 0)
+table(wine_data_scaled$quality_binary)  # Check distribution
+
+```
+
+```{r}
+# Set a seed for reproducibility
+set.seed(123)
+
+# Split the data
+trainIndex <- createDataPartition(wine_data_scaled$quality_binary, p = 0.75, list = FALSE)
+train_data <- wine_data_scaled[trainIndex, ]
+test_data <- wine_data_scaled[-trainIndex, ]
+
+```
+
+Building a model
+```{r}
+# Convert quality to a binary factor (classification)
+wine_data_scaled$quality_binary <- as.factor(ifelse(wine_data_scaled$quality >= 7, 1, 0))
+
+# Split data again if needed, keeping quality_binary as the target
+trainIndex <- createDataPartition(wine_data_scaled$quality_binary, p = 0.75, list = FALSE)
+train_data <- wine_data_scaled[trainIndex, ]
+test_data <- wine_data_scaled[-trainIndex, ]
+
+# Train the Random Forest model for classification
+rf_model <- randomForest(quality_binary ~ . - quality, data = train_data, ntree = 100)
+
+# Predict on test data with probability output
+pred_rf <- predict(rf_model, newdata = test_data, type = "prob")[, 2]
+
+# Check the first few predictions to confirm
+head(pred_rf)
+
+```
+
+Evaluating model
+```{r}
+# Convert probabilities to binary predictions (0 or 1) with threshold 0.5
+pred_class <- ifelse(pred_rf > 0.5, 1, 0)
+
+# View the first few predictions to confirm
+head(pred_class)
+
+
+# Load the caret package if not already loaded
+library(caret)
+
+# Confusion matrix to evaluate the performance of the model
+confusion <- confusionMatrix(factor(pred_class), factor(test_data$quality_binary))
+print(confusion)
+
+# Load the pROC library if not already loaded
+library(pROC)
+
+# Calculate the ROC curve
+roc_curve <- roc(test_data$quality_binary, pred_rf)
+
+# Plot the ROC curve
+plot(roc_curve, col = "blue", main = paste("ROC Curve (AUC =", round(auc(roc_curve), 2), ")"))
+
+# Display the AUC value
+auc_value <- auc(roc_curve)
+print(paste("AUC:", round(auc_value, 2)))
+
+# Plot feature importance
+varImpPlot(rf_model, main = "Feature Importance for Wine Quality Prediction")
+
+```
